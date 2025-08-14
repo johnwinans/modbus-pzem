@@ -1,13 +1,13 @@
 // NOTE: This was mostly written by Grok.
 // No Copyright.  Do with it as you wish!
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <modbus/modbus.h>
 #include <unistd.h>
 #include <errno.h>
+#include <time.h>
 
 #define SERIAL_PORT "/dev/ttyUSB0"
 #define BAUD_RATE 9600
@@ -15,10 +15,15 @@
 #define REG_START_ADDR 0x0000 				// Input registers start
 #define NUM_REGISTERS 10 					// Read 10 registers
 
+// delay between readings in usec
+#define	PERIOD		(2000000)
+//#define	PERIOD		(15000000)
+
 int main() {
     modbus_t *ctx = NULL;
     uint16_t registers[NUM_REGISTERS];
     int rc;
+
 
     // Create Modbus context
     ctx = modbus_new_rtu(SERIAL_PORT, BAUD_RATE, 'N', 8, 1);
@@ -44,12 +49,17 @@ int main() {
     // Set response timeout (2 sec)
     modbus_set_response_timeout(ctx, 2, 0);
 
+    printf("time,volt,amp,watt,kwh,freq,pwrfct\n");
+
     while (1) {
         // Read input registers
         rc = modbus_read_input_registers(ctx, REG_START_ADDR, NUM_REGISTERS, registers);
         if (rc == -1) {
             fprintf(stderr, "Error: Failed to read registers: %s\n", modbus_strerror(errno));
-            usleep(2000000);
+			// piece of crap seems to seize up.  repoen it
+    		modbus_close(ctx);
+    		modbus_connect(ctx);
+            usleep(PERIOD);
             continue;
         }
 
@@ -61,17 +71,36 @@ int main() {
         float frequency = registers[7] / 10.0;                  				// 7: Hz
         float power_factor = registers[8] / 100.0;              				// 8: Unitless
 
-        // Print results
-        printf("\nPZEM-004T V3.0 Readings:\n");
+#if 1
+        time_t rawtime;
+        struct tm *info;
+        char buffer[80];
+
+        // Get the current time
+        time(&rawtime);
+        info = localtime(&rawtime);
+        strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", info);
+        printf("%s,%.1f,%.3f,%.1f,%.3f,%.1f,%.2f\n",
+			buffer,
+			voltage,
+			current,
+			power,
+			energy,
+			frequency,
+			power_factor );
+		fflush( stdout );
+#else
+        printf("PZEM-004T V3.0,");
         printf("Voltage: %.1f V\n", voltage);
         printf("Current: %.3f A\n", current);
         printf("Power: %.1f W\n", power);
         printf("Energy: %.3f kWh\n", energy);
         printf("Frequency: %.1f Hz\n", frequency);
         printf("Power Factor: %.2f\n", power_factor);
+#endif
 
         // Wait before next reading
-        usleep(2000000);
+        usleep(PERIOD);
     }
 
     // Cleanup (unreachable in this loop)
